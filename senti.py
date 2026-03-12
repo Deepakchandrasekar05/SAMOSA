@@ -6,6 +6,7 @@ import pandas as pd
 import preprocessor as p
 import nltk
 nltk.download('punkt')
+nltk.download('punkt_tab')
 nltk.download('stopwords')
 nltk.download('wordnet')
 from nltk.corpus import stopwords
@@ -29,14 +30,13 @@ img_logo = Image.open(os.path.join(_dir, "logo.png"))
 with st.container():
     image_column, right_column = st.columns((1, 2))
 
-    with right_column:
-        st.header('S.A.M.O.S.A')
-        st.subheader("Sentiment Analysis Model On Scraped Articles!")
-        style = '''<style>h1 {font-size: 20px;padding-left:1px;}
-        h2 {padding: 120px;font-size: 70px;padding-left:1px;}</style>'''
-        st.markdown(style, unsafe_allow_html=True)
     with image_column:
         st.image(img_logo)
+    with right_column:
+        st.markdown("<div style='display:flex; align-items:center; height:100%; padding-top:80px;'>"
+                    "<div><h1 style='font-size:60px; margin:0;'>S.A.M.O.S.A</h1>"
+                    "<h2 style='font-size:24px; margin:0;'>Sentiment Analysis Model On Scraped Articles!</h2></div>"
+                    "</div>", unsafe_allow_html=True)
 
 
 def get_base64(bin_file):
