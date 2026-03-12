@@ -1,0 +1,40 @@
+body{
+    display: flex;
+    justify-content
+}
+
+.login{
+        width: 400px;
+        margin: auto;
+        padding: 80px;
+        background: #000000;
+        border-radius: 15px ;
+}
+
+h2{
+    text-align: center;
+    color: #FFFFE0;
+    padding: 10px;
+    font-size: 30px;
+}
+
+label{
+    color: #FFFFE0;
+    font-size: 30px;
+}
+
+#Username{
+    width: 300px;
+    height: 30px;
+    border: none;
+    border-radius: 4px;
+    padding-left: 8px;
+}
+
+#Password{
+    width: 300px;
+    height: 30px;
+    border: none;
+    border-radius: 4px;
+    padding-left: 8px;
+}
