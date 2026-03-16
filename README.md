@@ -1,5 +1,7 @@
 # SAMOSA
 
+![SAMOSA Logo](logo.png)
+
 SAMOSA stands for Sentiment Analysis Model On Scraped Articles.
 
 This project is a Streamlit-based sentiment analysis tool that can:
@@ -100,7 +102,3 @@ Use:
 If any tokenizer/corpus error appears, install/download manually:
 
     python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords'); nltk.download('wordnet')"
-
-## License
-
-No license file is currently included in this repository.
