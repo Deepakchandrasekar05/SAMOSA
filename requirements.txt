@@ -4,6 +4,5 @@ nltk
 textblob
 plotly
 selenium
-webdriver-manager
 pillow
 tweet-preprocessor

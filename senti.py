@@ -18,7 +18,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+import shutil
 
 
 _dir = os.path.dirname(os.path.abspath(__file__))
@@ -154,58 +154,81 @@ with st.expander('Analyze Text'):
 with st.expander('Analyze by scraping a youtube video '):
     url = st.text_input('Enter the url of the youtube video here:')
     if url:
-        options = webdriver.ChromeOptions()
-        options.add_argument("--headless")
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        try:
+            options = webdriver.ChromeOptions()
+            options.add_argument("--headless")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-gpu")
+            options.add_argument("--disable-setuid-sandbox")
+            options.add_argument("--remote-debugging-port=0")
+            options.add_argument("--window-size=1920,1080")
 
-        driver.get(url)
+            # Use system chromium (installed via packages.txt on Streamlit Cloud)
+            chromium_path = shutil.which("chromium") or shutil.which("chromium-browser")
+            chromedriver_path = shutil.which("chromedriver") or shutil.which("chromium-driver")
 
-        time.sleep(5)
+            if chromedriver_path:
+                service = Service(executable_path=chromedriver_path)
+            else:
+                # Fallback: let Selenium locate the driver automatically
+                service = Service()
 
-        scroll_pause_time = 2
-        num_scrolls = 20
-        for _ in range(num_scrolls):
-            driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.END)
-            time.sleep(scroll_pause_time)
-        comments = driver.find_elements(By.XPATH, '//*[@id="content-text"]')
+            if chromium_path:
+                options.binary_location = chromium_path
 
-        comments_list = [comment.text for comment in comments]
+            driver = webdriver.Chrome(service=service, options=options)
 
-        reviews_data = pd.DataFrame(comments_list, columns=['Comment'])
+            driver.get(url)
 
-        driver.quit()
-        text_columns = [col for col in reviews_data.columns if
-                        reviews_data[col].dtype == 'object' and (reviews_data[col].str.len() > 10).any()]
+            time.sleep(5)
 
-        reviews_data.rename(columns={col: 'Reviews' for col in text_columns}, inplace=True)
+            scroll_pause_time = 2
+            num_scrolls = 20
+            for _ in range(num_scrolls):
+                driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.END)
+                time.sleep(scroll_pause_time)
+            comments = driver.find_elements(By.XPATH, '//*[@id="content-text"]')
 
-        reviews_data['Reviews'] = reviews_data['Reviews'].apply(lambda x: str(x).strip())
+            comments_list = [comment.text for comment in comments]
 
-        reviews_data['clean_reviews'] = reviews_data['Reviews'].apply(lambda x: p.clean(str(x)))
+            reviews_data = pd.DataFrame(comments_list, columns=['Comment'])
 
-        reviews_data['clean_reviews'] = reviews_data['clean_reviews'].apply(clean_verified)
+            driver.quit()
+            text_columns = [col for col in reviews_data.columns if
+                            reviews_data[col].dtype == 'object' and (reviews_data[col].str.len() > 10).any()]
 
-        reviews_data['clean_reviews'] = reviews_data['clean_reviews'].apply(punctuation_removal)
+            reviews_data.rename(columns={col: 'Reviews' for col in text_columns}, inplace=True)
 
-        lemmatizer = nltk.stem.WordNetLemmatizer()
+            reviews_data['Reviews'] = reviews_data['Reviews'].apply(lambda x: str(x).strip())
 
+            reviews_data['clean_reviews'] = reviews_data['Reviews'].apply(lambda x: p.clean(str(x)))
 
-        def lemmatize_text(text):
-            return [(lemmatizer.lemmatize(w)) for w in word_tokenize(text)]
+            reviews_data['clean_reviews'] = reviews_data['clean_reviews'].apply(clean_verified)
 
+            reviews_data['clean_reviews'] = reviews_data['clean_reviews'].apply(punctuation_removal)
 
-        reviews_data['tokenized_reviews'] = reviews_data['clean_reviews'].apply(lemmatize_text)
-        reviews_data['tokenized_reviews'] = reviews_data['tokenized_reviews'].apply(
-            lambda x: [item for item in x if item not in stop_words])
-        reviews_data['tokenized_reviews'] = reviews_data['tokenized_reviews'].apply(lambda x: ' '.join(x))
+            lemmatizer = nltk.stem.WordNetLemmatizer()
 
-        reviews_data['score'] = reviews_data['clean_reviews'].apply(score)
-        reviews_data['sentiment'] = reviews_data['clean_reviews'].apply(sentiment_analyzer)
-        st.subheader('The Result of the Analysis is:')
-        st.write(reviews_data[['Reviews', 'score', 'sentiment']].head(10))
-        plot(reviews_data,0)
+            def lemmatize_text(text):
+                return [(lemmatizer.lemmatize(w)) for w in word_tokenize(text)]
 
-        download_data(reviews_data,1)
+            reviews_data['tokenized_reviews'] = reviews_data['clean_reviews'].apply(lemmatize_text)
+            reviews_data['tokenized_reviews'] = reviews_data['tokenized_reviews'].apply(
+                lambda x: [item for item in x if item not in stop_words])
+            reviews_data['tokenized_reviews'] = reviews_data['tokenized_reviews'].apply(lambda x: ' '.join(x))
+
+            reviews_data['score'] = reviews_data['clean_reviews'].apply(score)
+            reviews_data['sentiment'] = reviews_data['clean_reviews'].apply(sentiment_analyzer)
+            st.subheader('The Result of the Analysis is:')
+            st.write(reviews_data[['Reviews', 'score', 'sentiment']].head(10))
+            plot(reviews_data, 0)
+
+            download_data(reviews_data, 1)
+
+        except Exception as e:
+            st.error(f"❌ Failed to launch browser for scraping. Error: {e}")
+            st.info("💡 Make sure 'packages.txt' contains 'chromium' and 'chromium-driver' in your Streamlit Cloud deployment.")
 
 with st.expander('Analyze an Excel sheet(Upload it in a CSV Format)'):
     upload = st.file_uploader('Upload File')
