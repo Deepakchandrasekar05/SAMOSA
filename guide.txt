@@ -1,0 +1,323 @@
+SAMOSA Project Guide
+====================
+
+Overview
+--------
+SAMOSA stands for “Sentiment Analysis Model On Scraped Articles”. In this repository, SAMOSA is implemented as a Streamlit web application that:
+
+1) Analyzes sentiment for text you type directly.
+2) Scrapes YouTube video comments and runs sentiment analysis on the scraped comments.
+3) Accepts an uploaded CSV file, detects a text column, and runs sentiment analysis on each row.
+
+Sentiment is computed using TextBlob’s polarity score:
+- polarity > 0  -> positive
+- polarity < 0  -> negative
+- polarity == 0 -> neutral
+
+Key files in this repo
+----------------------
+- senti.py
+  Main Streamlit app. This is the “working” application described in README.
+
+- requirements.txt
+  Python dependencies needed by senti.py.
+
+- logo.png, bg.jpg
+  UI assets used by the Streamlit app (logo and background image).
+
+- Example.py, 0.py
+  Older/experimental scripts:
+  - Example.py is an earlier Streamlit app variant (very similar to senti.py but with different UI and section naming).
+  - 0.py is a standalone Selenium script that demonstrates scraping YouTube comments into a Pandas DataFrame.
+
+How to run SAMOSA
+-----------------
+Prerequisites (important for scraping)
+- Python 3.9+ recommended.
+- Google Chrome installed.
+- Internet access:
+  - NLTK downloads language resources at runtime.
+  - webdriver-manager downloads a compatible ChromeDriver.
+
+Install dependencies
+- In the project folder, create a virtual environment (recommended) and install:
+  pip install -r requirements.txt
+
+Run the Streamlit app
+- Start the Streamlit server:
+  streamlit run senti.py
+
+Then open the local URL Streamlit prints (commonly http://localhost:8501).
+
+
+Deep dive: senti.py
+===================
+
+High-level structure
+--------------------
+The file senti.py is both:
+- the UI definition (Streamlit layout and widgets), and
+- the data/ML pipeline (cleaning + sentiment scoring + charts + downloading).
+
+It runs top-to-bottom when Streamlit executes the script, with interactive sections controlled by Streamlit widgets.
+
+
+Imports and runtime downloads
+-----------------------------
+Key imports used:
+- streamlit: UI framework.
+- pandas: tabular data (DataFrame) for results.
+- nltk: tokenization, stopwords, and lemmatization.
+- textblob: sentiment polarity score.
+- plotly.express: charts.
+- selenium + webdriver-manager: automated browser for scraping YouTube comments.
+- tweet-preprocessor (imported as preprocessor): text cleaning helpers used via p.clean().
+- pillow (PIL): image loading (logo).
+
+At the top of the script, senti.py calls:
+  nltk.download('punkt')
+  nltk.download('punkt_tab')
+  nltk.download('stopwords')
+  nltk.download('wordnet')
+
+This ensures the NLTK resources exist on the machine running the app.
+Note: 'punkt_tab' is not a common NLTK resource name in many setups; if it fails, the app may still work with just 'punkt', but the exact behavior depends on the installed NLTK version.
+
+
+App configuration and header
+----------------------------
+- The app computes _dir = directory of senti.py.
+- Streamlit is configured with:
+  st.set_page_config(page_title=..., page_icon=..., layout="wide")
+
+- The header section uses st.columns to display:
+  - the logo image (logo.png) on the left
+  - a title/subtitle on the right, rendered using st.markdown and inline HTML.
+
+
+Background image logic
+----------------------
+Two helper functions implement the background image:
+
+1) get_base64(bin_file)
+   - Reads a file as bytes and base64-encodes it.
+   - Returns a base64 string.
+
+2) set_background(png_file)
+   - Embeds the base64 string into a <style> block.
+   - Applies a background image to the Streamlit app root (.stApp).
+
+The app calls:
+  set_background(os.path.join(_dir, 'bg.jpg'))
+
+So the background image is loaded from the repository file bg.jpg (relative to the script location).
+
+
+Text cleaning helpers
+---------------------
+These functions are used to normalize/clean text before tokenization and sentiment scoring:
+
+1) punctuation_removal(text)
+   - Ensures text is a string.
+   - Removes characters listed in the hard-coded punc string.
+   - Returns the cleaned string.
+
+2) clean_verified(review)
+   - Removes prefixes:
+     - 'Trip Verified | '
+     - 'Not Verified | '
+   - This looks like it was originally designed for airline/hotel review datasets, but it still works as a generic prefix-cleaner.
+
+3) stop_words
+   - A global set created via NLTK stopwords:
+     stopwords.words('english')
+
+4) filter_words(review)
+   - Tokenizes and filters out stopwords/non-alpha tokens.
+   - In senti.py, this helper is defined but not actually used later in the script.
+
+
+Sentiment functions
+-------------------
+All sentiment scoring is built on TextBlob:
+
+1) score(review)
+   - Returns TextBlob(review).sentiment.polarity
+   - Polarity is a float typically in [-1.0, 1.0].
+
+2) sentiment_analyzer(review)
+   - Uses score thresholds:
+     - score > 0  => "positive"
+     - score < 0  => "negative"
+     - otherwise  => "neutral"
+
+These are used in every app section (typed text, scraped comments, uploaded CSV).
+
+
+Charting: plot(df, chart_selection_counter)
+--------------------------------------------
+This function expects df to have a column named 'sentiment'.
+
+- It counts each label (positive/negative/neutral), using value_counts().get(..., 0) to avoid KeyErrors.
+- It shows a radio button for chart type selection: Pie / Bar / Line.
+- It builds a small DataFrame (plot_val) with the counts.
+- It uses Plotly Express to render the selected chart.
+
+The function also tries to ensure unique widget keys by building:
+  unique_key = f"chart_option_{chart_selection_counter}"
+
+However, note that chart_selection_counter is passed in by value and then incremented locally. This works for the specific call-sites as written (they pass different seed values like 0 or 10), but it is not persistent state across reruns the way st.session_state would be.
+
+
+Download helper: download_data(df, key)
+---------------------------------------
+- Converts df to CSV bytes (UTF-8) and exposes it via st.download_button.
+- Increments the provided key value to try to avoid widget key collisions.
+
+The downloaded file name is always:
+  sentiment.csv
+
+
+UI: Streamlit expanders (the three main features)
+================================================
+
+1) Analyze Text
+---------------
+Widget:
+- st.text_input('Enter the Text here:')
+
+Behavior:
+- When the user types text:
+  - Show polarity score via score(text)
+  - Show label via sentiment_analyzer(text)
+
+This is the simplest path and doesn’t require Selenium.
+
+
+2) Analyze by scraping a youtube video
+--------------------------------------
+Widget:
+- st.text_input('Enter the url of the youtube video here:')
+
+Pipeline overview
+A) Selenium setup
+- Creates ChromeOptions and enables headless mode:
+  options.add_argument("--headless")
+- Starts Chrome driver via webdriver-manager:
+  webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
+B) Load and scroll
+- Opens the provided URL.
+- Waits 5 seconds.
+- Scrolls to the bottom of the page 20 times by sending Keys.END to <body>.
+  This is to force more comments to load.
+
+C) Extract comments
+- Finds elements by XPath '//*[@id="content-text"]'.
+- Extracts .text from each comment element.
+- Puts comments into a DataFrame.
+
+D) Normalize column naming
+- The DataFrame starts with column name 'Comment'.
+- It then tries to find “text-like” columns (dtype=object and any length > 10), and renames those columns to 'Reviews'.
+  With the current scraped structure, it typically ends up with a single 'Reviews' column.
+
+E) Cleaning and tokenization
+- Strips whitespace.
+- Applies tweet-preprocessor cleanup via p.clean().
+  (This typically removes URLs, emojis/smileys, mentions, hashtags depending on config.)
+- Applies clean_verified() (prefix remover).
+- Applies punctuation_removal().
+
+Lemmatization step:
+- Creates a WordNetLemmatizer.
+- Tokenizes with word_tokenize.
+- Lemmatizes each token.
+- Removes stopwords.
+- Joins tokens back into a space-separated string.
+
+Important note:
+- The script computes tokenized_reviews, but sentiment scoring is calculated from clean_reviews (not tokenized_reviews). Tokenization/lemmatization is therefore mainly for “prepared text” rather than directly influencing the current scoring logic.
+
+F) Scoring and output
+- Adds:
+  - df['score'] = score(clean_reviews)
+  - df['sentiment'] = sentiment_analyzer(clean_reviews)
+- Displays the first 10 rows of Reviews, score, sentiment.
+- Shows charts via plot(...).
+- Allows downloading the full DataFrame via download_data(...).
+
+What can go wrong in this section
+- If Chrome is not installed, Selenium won’t start.
+- If a corporate proxy/firewall blocks driver downloads, webdriver-manager may fail.
+- If YouTube changes its DOM structure, the XPath selector may stop finding comment text.
+- Scrolling may load fewer comments than expected depending on network speed and the video page behavior.
+
+
+3) Analyze an Excel sheet (Upload it in a CSV Format)
+-----------------------------------------------------
+Widget:
+- st.file_uploader('Upload File')
+
+Pipeline overview
+A) Read CSV
+- Reads the uploaded file as CSV:
+  pd.read_csv(upload, encoding='utf-8')
+
+B) Detect and rename text column(s)
+- Finds columns where dtype is object and any value length > 10.
+- Renames all such columns to 'Reviews'.
+
+Important note:
+- If there are multiple text-like columns, renaming them all to 'Reviews' can create duplicate column names. In Pandas, that’s allowed, but it can lead to ambiguous behavior later.
+
+C) Cleaning + lemmatization
+- Same steps as the YouTube branch:
+  - strip
+  - p.clean
+  - clean_verified
+  - punctuation_removal
+  - lemmatize
+  - remove stopwords
+  - join tokens
+
+D) Scoring and output
+- Adds score + sentiment columns from clean_reviews.
+- Displays first 10 rows.
+- Charts + download.
+
+
+Practical tips for using SAMOSA
+===============================
+
+Input quality
+- For best results, provide reasonably complete sentences.
+- Very short text (e.g., single word) can often score as neutral depending on TextBlob’s lexicon coverage.
+
+CSV format guidance
+- Ensure the CSV has at least one column containing text.
+- If your text column is named something else (e.g., "text" or "comment"), the app will attempt to detect it automatically.
+
+Scraping guidance
+- Use a full YouTube video URL.
+- If the results are empty, try again or increase scrolling logic in code (num_scrolls) if you plan to modify the scraper.
+
+
+Dependencies explained (why each matters)
+========================================
+- streamlit: renders UI, handles widgets, reruns script on interaction.
+- pandas: stores scraped/uploaded text and computed results.
+- nltk: stopwords list, tokenization, lemmatization resources.
+- textblob: computes polarity sentiment score.
+- plotly: interactive plots for sentiment distribution.
+- selenium: browser automation to scrape dynamic YouTube comments.
+- webdriver-manager: automatically installs a matching ChromeDriver.
+- pillow: loads logo image.
+- tweet-preprocessor: cleans social/text artifacts (URLs/mentions/etc.) using p.clean().
+
+
+Where to look next
+==================
+If you want to understand the app’s behavior quickly:
+- Start at the three expanders near the bottom of senti.py, because they drive the main user experience.
+- Then read helper functions at the top (score, sentiment_analyzer, plot, download_data) to see how results are computed and displayed.

@@ -5,10 +5,6 @@ from PIL import Image
 import pandas as pd
 import preprocessor as p
 import nltk
-nltk.download('punkt')
-nltk.download('punkt_tab')
-nltk.download('stopwords')
-nltk.download('wordnet')
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from textblob import TextBlob
@@ -18,12 +14,36 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, WebDriverException
 import shutil
 
 
 _dir = os.path.dirname(os.path.abspath(__file__))
 
 st.set_page_config(page_title="S.A.M.O.S.A", page_icon=os.path.join(_dir, "logo.png"), layout="wide")
+
+
+@st.cache_resource(show_spinner=False)
+def ensure_nltk_resources():
+    resources = [
+        ("tokenizers/punkt", "punkt"),
+        ("corpora/stopwords", "stopwords"),
+        ("corpora/wordnet", "wordnet"),
+    ]
+    for resource_path, download_name in resources:
+        try:
+            nltk.data.find(resource_path)
+        except LookupError:
+            try:
+                nltk.download(download_name, quiet=True)
+            except Exception:
+                # Don't fail app startup if download is temporarily unavailable.
+                pass
+
+
+ensure_nltk_resources()
 
 img_logo = Image.open(os.path.join(_dir, "logo.png"))
 
@@ -154,6 +174,7 @@ with st.expander('Analyze Text'):
 with st.expander('Analyze by scraping a youtube video '):
     url = st.text_input('Enter the url of the youtube video here:')
     if url:
+        driver = None
         try:
             options = webdriver.ChromeOptions()
             options.add_argument("--headless")
@@ -177,29 +198,35 @@ with st.expander('Analyze by scraping a youtube video '):
             if chromium_path:
                 options.binary_location = chromium_path
 
-            driver = webdriver.Chrome(service=service, options=options)
+            try:
+                driver = webdriver.Chrome(service=service, options=options)
+            except WebDriverException as launch_error:
+                st.error(f"Failed to launch Chromium/ChromeDriver: {launch_error}")
+                st.info("Make sure packages.txt contains chromium and chromium-driver on Streamlit Cloud.")
+                st.stop()
 
             driver.get(url)
 
-            time.sleep(5)
+            wait = WebDriverWait(driver, 15)
+            wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
 
-            scroll_pause_time = 2
-            num_scrolls = 20
+            scroll_pause_time = 1.5
+            num_scrolls = 25
             for _ in range(num_scrolls):
-                driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.END)
+                driver.execute_script("window.scrollTo(0, document.documentElement.scrollHeight);")
                 time.sleep(scroll_pause_time)
-            comments = driver.find_elements(By.XPATH, '//*[@id="content-text"]')
 
-            comments_list = [comment.text for comment in comments]
+            comment_nodes = driver.find_elements(By.CSS_SELECTOR, 'ytd-comment-thread-renderer #content-text')
+            if not comment_nodes:
+                comment_nodes = driver.find_elements(By.ID, 'content-text')
 
-            reviews_data = pd.DataFrame(comments_list, columns=['Comment'])
+            comments_list = [comment.text.strip() for comment in comment_nodes if comment.text and comment.text.strip()]
 
-            driver.quit()
-            text_columns = [col for col in reviews_data.columns if
-                            reviews_data[col].dtype == 'object' and (reviews_data[col].str.len() > 10).any()]
+            if not comments_list:
+                st.warning("No comments were scraped. Comments may be disabled, still loading, or blocked by YouTube in headless mode.")
+                st.stop()
 
-            reviews_data.rename(columns={col: 'Reviews' for col in text_columns}, inplace=True)
-
+            reviews_data = pd.DataFrame({'Reviews': comments_list})
             reviews_data['Reviews'] = reviews_data['Reviews'].apply(lambda x: str(x).strip())
 
             reviews_data['clean_reviews'] = reviews_data['Reviews'].apply(lambda x: p.clean(str(x)))
@@ -226,9 +253,14 @@ with st.expander('Analyze by scraping a youtube video '):
 
             download_data(reviews_data, 1)
 
+        except TimeoutException:
+            st.error("Timed out while waiting for the YouTube page/comments to load.")
+            st.info("Try opening the video once in your browser, then retry with a direct watch URL.")
         except Exception as e:
-            st.error(f"❌ Failed to launch browser for scraping. Error: {e}")
-            st.info("💡 Make sure 'packages.txt' contains 'chromium' and 'chromium-driver' in your Streamlit Cloud deployment.")
+            st.error(f"Scraping failed: {e}")
+        finally:
+            if driver is not None:
+                driver.quit()
 
 with st.expander('Analyze an Excel sheet(Upload it in a CSV Format)'):
     upload = st.file_uploader('Upload File')
