@@ -29,6 +29,7 @@ st.set_page_config(page_title="S.A.M.O.S.A", page_icon=os.path.join(_dir, "logo.
 def ensure_nltk_resources():
     resources = [
         ("tokenizers/punkt", "punkt"),
+        ("tokenizers/punkt_tab", "punkt_tab"),
         ("corpora/stopwords", "stopwords"),
         ("corpora/wordnet", "wordnet"),
     ]
